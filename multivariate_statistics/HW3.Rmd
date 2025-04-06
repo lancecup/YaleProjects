@@ -1,0 +1,259 @@
+---
+title: "S&DS 563 HW3"
+author: "Lance Pangilinan"
+date: "2025-02-13"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+## Setup (Working Directory, Libraries, etc.)
+
+```{r setwd}
+rm(list=ls())
+setwd("~/Downloads/Multivariate_Stats")
+```
+
+```{r libraries}
+# Loading the necessary libraries
+library(MASS)
+library(biotools)
+library(klaR)
+library(car)
+library(dplyr)
+library(lubridate)
+library(ggplot2)
+library(ggExtra)
+library(heplots)
+library(ks)
+```
+## Recap: What is the dataset even about?
+
+The dataset was gathered by Richard Prothero from the Office of National Statistics in 2016 which focuses on towns and cities in England and Wales that highlights key indicators on citizens' housing situation and looks at deprivation from a multidimensional perspective.
+
+For the groups, I use the regions of these towns, but I only include those regions with more than 15 towns to properly estimate the chi-square quantile plots.
+
+For this analysis I include 9 variables:
+
+\- all_price_2015: Median House Price for that city, year ending Q2 2015: All properties.
+
+\- flat_sales_increase: Percentage point increase in proportion of flats sold, year ending Q4 1995 to year ending Q2 2015.
+
+\- pop_16_64:Population aged 16-64 for the city.
+
+-   households_owned: Percentage of households that owned houses in the city.
+
+\- households_rent_private: Percentage of households that rented in the city.
+
+\- student_prop_16_74: Percentage of the population aged 16-74 that are full-time students.
+
+\- num_lsoas: Number of Lower Layer Super Output Area (LSOA)
+
+-   A LSOA is a small geographic unit in England and Wales, designed for statistical analysis, typically covering 1,000 to 3,000 people.
+
+\- emp_deprived_lsoa: The percentage of LSOAs that fall within the top 20% most deprived areas based on the employment deprivation domain within the Index of Multiple Deprivation (IMD) - net_commuting: Net number of people that commute in (+) or out (-).
+
+## 1) 
+
+``` {r data}
+data <- read.csv("Housing_UK_2015.csv")
+
+variables <- c("region", "all_price_2015", "flat_sales_increase", "pop_16_64", "households_owned", "households_rent_private", "student_prop_16_74", "num_lsoas", "emp_deprived_lsoa", "net_commuting")
+
+data2 <- data[, variables]
+
+region_freq <- table(data2$region)
+
+# Reduce data to 10 towns per region since can't run chi-square plot with less observations
+# per region
+data3 <- data2[data2$region %in% names(region_freq[region_freq >= 15]), ]
+
+num_vars <- variables[variables != "region"]
+
+head(data3)
+```
+
+``` {r multnorm}
+head(region_freq)
+sapply(data3[, variables], class)
+
+cqplot(data3[data3$region == "North West", num_vars], 
+       main = "North West")
+
+cqplot(data3[data3$region == "East of England", c(num_vars)], main = "East of England")
+cqplot(data3[data3$region == "South East", c(num_vars)], main = "South East")
+cqplot(data3[data3$region == "West Midlands", c(num_vars)], main = "West Midlands")
+
+```
+
+``` {r cov_mx}
+print("Covariance Matrix for North West")
+nw_cov <- cov(data3[data3$region == "North West", num_vars])
+nw_cov
+
+print("Covariance Matrix for East of England")
+ee_cov <- cov(data3[data3$region == "East of England", num_vars])
+ee_cov
+
+print("Covariance Matrix for South East")
+se_cov <- cov(data3[data3$region == "South East", num_vars])
+se_cov
+
+print("Covariance Matrix for West Midlands")
+wm_cov <- cov(data3[data3$region == "West Midlands", num_vars])
+wm_cov
+
+# Covariances are clearly not the same so we use quadratic discriminant analysis
+```
+
+``` {r boxm}
+boxM(data3[,num_vars], data3$region)
+
+# Reject Box's M Test, further support that the covariance matrices are not equal
+
+```
+
+``` {r matrix_plot}
+data3$region <- as.factor(data3$region)
+
+col_vector <- as.numeric(data3$region) + 2  
+pch_vector <- as.numeric(data3$region) + 15 
+
+plot(data3[, num_vars], 
+     col = col_vector, 
+     pch = pch_vector, 
+     cex = 1.2,
+     main = "Scatterplot Matrix of Key Variables by Region")
+
+# legend("bottomright", legend = levels(data3$region), 
+#        col = unique(col_vector), 
+#        pch = unique(pch_vector),
+#        title = "Region")
+
+# Green circle is East of England, Teal Diamond is North West, Blue Triangle is South East, and Purple Circle is West Midlands
+```
+Based on the chi-squared plots of each region in England and Wales in the data set, I'd say there is strong evidence for multivariate normality within the regions since most of them lie within the required area (for the most part). With the raw data, just taking a cursory look at the covariance matrices immediately tell us that they are not equal and goes beyond our rule of thumb of being under a multiple of 4 of one another. But I also look to Box's M Test where I see a tiny p-value of 2.2e-16 where, even with the standard significance levels (0.1, 0.05, 0.01) and the adjusted one we can use to account for the sensitivity of the test (say, 0.001), we reject the null hypothesis that these covariance matrices are equal.
+
+Though, I don't plan to transform my data since I have multivariate normality within the groups and I can just do quadratic discriminant analysis to account for the non-equal covariance matrices.
+
+Looking at the scatter plot matrix gives a better feel of what the data actually looks like, though admittedly, a lot of it is hard to interpret granted that the data tend to clump together and be on top of one another, though right away we could see that the South East has disproportionately many LSOAs than the other regions. The lack of clarity may also be due to too many variables which reduces the allocated space per matrix, that will be adjusted for when doing stepwise discriminant analysis.
+
+## 2) 
+
+``` {r step}
+set.seed(5000)
+
+# Calculating priors
+summary(data3$region)
+total_regs <- 15+19+18+15
+ee <- 15/total_regs
+nw <- 19/total_regs
+se <- 18/total_regs
+wm <- 15/total_regs
+
+step1 <- stepclass(region ~ pop_16_64 + households_owned + households_rent_private + student_prop_16_74 + num_lsoas + emp_deprived_lsoa + net_commuting + all_price_2015 + flat_sales_increase, data = data3, method = "qda", direction = "both", prior = c(ee, nw, se, wm))
+plot(step1)
+
+relevant_var <- c("all_price_2015", "emp_deprived_lsoa")
+data4 <- data3[, c("region", relevant_var)]
+```
+
+Since I have a lot of possible discriminators, I use stepwise discriminant analysis to find the variables of best discrimination / remove the variables that discriminate the regions the least. Specifically, I do stepwise quadratic DA due to the different covariance matrices between regions. From the stepwise DA, there seems to be two significant discriminating variables "all_price_2015" and "emp_deprived_lsoa". This model would have a correctness rate of 0.59048. 
+
+## 3) 
+
+``` {r wilks}
+data4.manova <- manova(as.matrix(data4[,relevant_var]) ~ data4$region)
+summary.manova(data4.manova, test="Wilks")
+summary.aov(data4.manova)
+```
+
+After doing the multivariate version of Wilks' Multivariate Test of Group Means, since the p-value (9.203e-10) is much less than our significance level (0.05), then we can reject the null hypothesis that the group means are equal. When we look at it from the univariate perspective for each variable, we see that there are definitely differences due to all_price_2015 (p-value of 5.394e-10) and the emp_deprived_lsoa (p-value of 0.02067) too (to a lesser degree).
+
+## 4) 
+
+``` {r sig}
+source("http://www.reuningscherer.net/multivariate/R/discrim.r.txt")
+discriminant.significance(data4[, relevant_var], data4$region)
+```
+We only have one significant discriminator "all_price_2015" since the p-value of the second variable "emp_deprived_lsoa" is above our significance level (0.05). Even though there is only one significant discriminator, I still force both of them into my model for the rest of the analysis.
+
+## 5) 
+
+``` {r class}
+data4.discCV <- qda(data4[, relevant_var], grouping = data4$region, prior = c(ee, nw, se, wm), CV = TRUE)
+(ctCV <- table(data4$region, data4.discCV$class))
+
+round(sum(diag(prop.table(ctCV))), 2)
+```
+With regular classification, we end up with a success rate of 52%. While it does seem low, considering there's 4 groups, if we picked one at random, we'd be right 25% of the time. So I'd say this is a relatively big improvement. But we can see from the table above that a lot of the errors come from misclassifying East of England and West Midlands, where only 3 and 7 of their towns were correctly identified. 
+
+``` {r leave_one}
+(step1 <- stepclass(region ~ all_price_2015 + emp_deprived_lsoa, data = data4, method = "qda", direction = "both", fold = nrow(data4)))
+names(step1)
+step1$result.pm
+```
+
+Meanwhile, if we conduct leave one out classification, we actually get slightly worse results with an accuracy rate of about 50.74%.
+
+## 6) 
+
+``` {r standard}
+print("Standardized Coefficients")
+round(qda(data4[, relevant_var], grouping = data4$region, prior = c(ee, nw, se, wm))$scaling,2)
+```
+
+Looking at the coefficients, it seems that all_price_2015 is only a better discriminator for East of England and Northwest regions while emp_deprived_lsoa better discriminates for the South East and West Midlands.
+
+## 7) 
+
+N/A since I used quadratic discriminant analysis and score plots aren't appropriate in this case.
+
+## 8) 
+
+``` {r wo}
+partimat(data4$region ~ all_price_2015 + emp_deprived_lsoa, data = data4, method = "qda", prior = c(ee, nw, se, wm))
+```
+
+## 9) 
+
+``` {r k}
+data4 <- data3 %>% 
+  mutate(across(relevant_var, scale))
+
+kde_models <- list()
+east <- data4[data4$region == "East of England", relevant_var]
+north_west <- data4[data4$region == "North West", relevant_var]
+south_east <- data4[data4$region == "South East", relevant_var]
+west_mid <- data4[data4$region == "West Midlands", relevant_var]
+
+f1 <- kde(x = east)
+kde_models[["east"]] <- f1
+
+f2 <- kde(x = north_west)
+kde_models[["north_west"]] <- f2
+
+f3 <- kde(x = south_east)
+kde_models[["south_east"]] <- f3
+
+f4 <- kde(x = west_mid)
+kde_models[["west_mid"]] <- f4
+
+predict_group <- function(new_data) {
+  probabilities <- sapply(kde_models, function(model) {
+    predict(model, x = new_data)
+  })
+  
+  probabilities <-  probabilities / sum(probabilities)
+  
+  return(names(which.max(probabilities)))
+}
+```
+
+``` {r plotk}
+plot(kde_models[["east"]], main = "Kernel Density Estimation - East of England")
+plot(kde_models[["north_west"]], main = "Kernel Density Estimation - North West")
+plot(kde_models[["south_east"]], main = "Kernel Density Estimation - South East")
+plot(kde_models[["west_mid"]], main = "Kernel Density Estimation - West Midlands")
+```

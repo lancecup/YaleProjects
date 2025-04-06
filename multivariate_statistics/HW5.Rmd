@@ -1,0 +1,207 @@
+---
+title: "S&DS 563 HW3"
+author: "Lance Pangilinan"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup (Working Directory, Libraries, etc.)
+
+```{r setwd}
+rm(list=ls())
+setwd("~/Downloads/Multivariate_Stats")
+```
+
+```{r libraries}
+library(aplpack)
+library(fpc)
+library(cluster)
+library(ape)
+library(amap)
+```
+
+## Recap: What is the dataset even about?
+
+The dataset was gathered by Richard Prothero from the Office of National Statistics in 2016 which focuses on towns and cities in England and Wales that highlights key indicators on citizens' housing situation and looks at deprivation from a multidimensional perspective. Each observation is a town.
+
+For this analysis I include 5 variables:
+
+\- all_price_2015: Median House Price for that city, year ending Q2 2015: All properties.
+
+\- flat_sales_increase: Percentage point increase in proportion of flats sold, year ending Q4 1995 to year ending Q2 2015.
+
+\- households_owned: Percentage of households that owned houses in the city.
+
+\- households_rent_private: Percentage of households that rented in the city.
+
+\- student_prop_16_74: Percentage of the population aged 16-74 that are full-time students.
+
+``` {r data}
+# Loading the data
+data <- read.csv("Housing_UK_2015.csv")
+
+variables <- c("town", "all_price_2015", "flat_sales_increase", "households_owned", "households_rent_private", "student_prop_16_74")
+
+data2 <- data[, variables]
+
+num_vars <- variables[variables != "town"]
+```
+
+``` {r half}
+# For convenience of interpretation, halve the observations from 109 to 55
+set.seed(123)  # set seed for reproducability
+n <- nrow(data2)
+idx <- sample(n, 55) 
+
+half1 <- data2[idx, ]          # random half
+half2 <- data2[-idx, ]         # the other half
+```
+
+## 1) 
+Most variables in the dataset are continuous proportions or percentages (e.g., housing tenure, student population, age structure), while all_price_2015 is a continuous variable measured in monetary units. Since all features are numeric, a distance metric suitable for continuous data is appropriate. Manhattan distance is a good choice in this context because it sums absolute differences across variables, making it more robust to outliers and less sensitive to large single-variable deviations than Euclidean-based distances.
+
+Given that the variables are measured on different scales, particularly with all_price_2015 having much larger values than percentage-based variables; it is important to standardize the data (e.g., by converting variables to z-scores). This ensures that each variable contributes equally to the distance calculations and avoids skewing the clustering results based on variable scale.
+
+``` {r standardize}
+datanorm <- half1[, num_vars]
+rownames(datanorm) <- half1[,1]
+datanorm <- scale(na.omit(datanorm))
+```
+
+## 2)
+
+# Clustering 1 - Manhattan Distance measure and Average Linkage
+
+``` {r manhattan-average}
+# Distance Matrix
+dist <- dist(datanorm, method = "manhattan")
+
+# Average Linkage
+cluster <- hclust(dist, method = "average")
+
+# Plotting the dendogram
+plot(cluster, labels = rownames(datanorm), cex = 0.6, xlab = "", ylab = "Distance", main = "Clustering of Towns")
+
+```
+
+# Clustering 2 - Maximum Distance measure and Complete Linkage
+
+``` {r euclidean-ward}
+# Distance Matrix
+dist2 <- dist(datanorm, method = "maximum")
+
+# Ward's Linkage
+cluster2 <- hclust(dist2, method = "complete")
+
+# Plotting the dendogram
+plot(cluster, labels = rownames(datanorm), cex = 0.6, xlab = "", ylab = "Distance", main = "Clustering of Towns")
+```
+The two dendrograms reflect different clustering outcomes based on the chosen distance metrics and linkage methods. The first dendrogram, using Manhattan distance with average linkage, produces less compact and more uneven clusters, with several long branches indicating greater variability within clusters. In contrast, the second dendrogram, based on Euclidean distance with Ward’s linkage, results in more balanced and compact clusters, as Ward’s method explicitly minimizes within-cluster variance. Notably, both approaches identify Brighton and Hove and Salford as distinct from all other towns, though the separation is more pronounced under Ward’s method. Overall, Ward’s linkage with Euclidean distance tends to create clusters that are more internally cohesive, while Manhattan with average linkage allows for broader clusters based on cumulative absolute differences.
+
+## 3)
+
+``` {r clust1-eval}
+source("https://raw.githubusercontent.com/jreuning/sds363_code/refs/heads/main/HClusEval3.R.txt")
+hclus_eval(datanorm, dist_m = 'manhattan', clus_m = 'average', plot_op = T, print_num = 15)
+
+```
+
+Looking at the first cluster, cluster distance seems to have elbows at groups of 3 and 6, while the semi-partial R squared sees an elbow at either groups of 2 and 4. Meanwhile, the R squared, finds flat spots at groups of 9 and 4. Finally, the root-mean square standard deviation finds flat spots from 4 to 6. So from all this, cluster 1 works best with 4 groups since that has the most common "solutions".
+
+``` {r cluster2-eval}
+hclus_eval(datanorm, dist_m = 'maximum', clus_m = 'complete', plot_op = T, print_num = 15)
+```
+
+Starting again with the cluster distance, elbows show up at 11, 9, 7, and 4. The semi-partial R squared finds elbows at groups of 6, 4, and 3. The root-mean squared standard deviation finds flat spots 2-3, and 9-10. Finally, R squared sees flat spots over groups of 6-7 and 4-5. So just like in the previous case, it seems that the optimal cluster number is again 4. 
+
+## 4) 
+
+``` {r k-means}
+# Suppose 4 clusters
+km1 <- kmeans(datanorm, centers = 4)
+km1
+
+for (i in 1:4){
+  print(paste("Towns in Cluster ", i))
+  print(half1$town[km1$cluster == i])
+  print (" ")
+}
+
+```
+
+```{r sse-vs-k-plot}
+# Scree plot: Within-group SSE vs. number of clusters (k)
+n.lev <- 15
+wss <- numeric(n.lev)
+
+# Compute SSE for actual data
+for (i in 1:n.lev) {
+  wss[i] <- sum(kmeans(datanorm, centers = i, nstart = 10)$withinss)
+}
+
+# Plot Scree Plot
+plot(1:n.lev, wss, type = "b", pch = 19, col = "blue",
+     xlab = "Number of Clusters (k)",
+     ylab = "Within Groups SSE",
+     main = "Scree Plot of K-Means Clustering")
+```
+The scree plot displays the within-groups sum of squares (SSE) for k-means clustering solutions ranging from 1 to 15 clusters. As expected, the SSE decreases as the number of clusters increases, since adding more clusters always improves fit. The key is to identify an elbow point where additional clusters result in diminishing returns.
+
+From the plot, there is a clear elbow around k = 2, where the drop in SSE noticeably slows down. This suggests that the most meaningful structure in the data is captured by 3 clusters, which is one group less than the results from the hierarchical clustering diagnostics in Question 3. Beyond 2 clusters, the SSE continues to decline, but the rate of improvement is much less substantial.
+
+Therefore, a 2-cluster solution appears justified based on the scree plot, and while slightly more conservative than the hierarchical result, it still captures the major structure in the dataset.
+
+## 5)
+
+```{r pca-da-cluster1}
+#get membership vector (which country is in which group)
+cuts1 <- cutree(cluster, k = 2)
+cuts1
+
+#Make plot of two cluster solution in space desginated by first two principal components
+
+clusplot(datanorm, cuts1, color = TRUE, shade = TRUE, labels = 2 , lines = 0,
+         main = "UK Towns Cluster Plot, Average Linkage, First two PC")
+
+#Make plot of two cluster solution in space desginated by first two
+#  two discriminant functions
+
+plotcluster(datanorm[,1:5], cuts1, main = "Two Cluster Solution in DA Space",
+            xlab = "First Discriminant Function", ylab = "Second Discriminant Function")
+```
+
+```{r pca-da-cluster2}
+#get membership vector (which country is in which group)
+cuts2 <- cutree(cluster2, k = 2)
+cuts2
+
+#Make plot of two cluster solution in space desginated by first two principal components
+
+clusplot(datanorm, cuts2, color = TRUE, shade = TRUE, labels = 2 , lines = 0,
+         main = "UK Towns Cluster Plot, Ward's Method Linkage, First two PC")
+
+#Make plot of two cluster solution in space desginated by first two
+#  two discriminant functions
+
+plotcluster(datanorm[,1:5], cuts2, main = "Two Cluster Solution in DA Space",
+            xlab = "First Discriminant Function", ylab = "Second Discriminant Function")
+```
+
+## 6) 
+
+The hierarchical clusters being plotted on PCA and DA space seem to affirm the finding of Question 4, i.e. the actual number of groups seem to be 2. But even that is kind of a stretch since the graphs above kind of show what's happening, specifically that a lot of the towns are actually quite similar to one another and are all bunched up together. This is the case in cluster one and actually onle shows 1 clear group with 2 outliers that "form" the second group. Meanwhile the 2nd cluster seems to differentiate the groups by considering the directions of the towns in PCA space but even then if you look at DA space the two "groups" seem to be very close to the group 1 towns and have a considerable overlap.
+
+## 7) 
+
+So finally, we can see that two groups emerge. First I want to see what the two observations in cluster1 would characterize their own group. It seems that for the towns Salford & Brighton and Hove, they seem to be towns with a lower proportion of households owning homes and those that are very student-oriented, those of which rent a disproportionate amount and see more flats being sold (possible landlords entering the market). While the other group is everything else. These groups kind of don't make since Nottingham which is similar to Salford but is in the majority group, also shares many of its characteristics with Salford.
+
+Meanwhile looking to cluster2, it is almost the same story except the separate group is composed of 5 towns (St. Albans, Sutton Coldfield, Weston-Super-Mare, Blackpool, and South Shields). The only common characteristic of these towns is that they have a lower proportion of students than the other towns, while the other variables seem to conflict with one another. So here too the groups don't seem to make sense.
+
+``` {r }
+datanorm[half1$town %in% c("Salford", "Brighton and Hove", "Nottingham"), ]
+datanorm[half1$town %in% c("St Albans", "Sutton Coldfield", "Weston-Super-Mare", "Blackpool","South Shields"), ]
+```

@@ -1,0 +1,283 @@
+---
+title: "S&DS 563 HW2"
+output:
+  pdf_document: default
+  html_document: default
+date: "2025-02-03"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup (Working Directory, Libraries, etc.)
+
+```{r setwd}
+rm(list=ls())
+setwd("~/Downloads/Multivariate_Stats")
+```
+
+```{r libraries}
+# Loading the necessary libraries
+library(ggplot2)
+library(corrplot)
+library(PerformanceAnalytics)
+library(FactoMineR)
+library(heplots)
+library(aplpack)
+library(fpc)
+library(cluster)
+library(ape)
+library(amap)
+library(dplyr)
+```
+
+```{r functions}
+# Defining functions for parallel analysis, scoreplot
+parallel<-function(n,p){
+  
+  if (n > 1000 || p > 100) {
+    print ("Sorry, this only works for n<1000 and p<100")
+    stop()
+  }
+  
+  coefs <- matrix(
+    c(0.0316, 0.7611, -0.0979, -0.3138, 0.9794, -.2059, .1226, 0, 0.1162, 
+      0.8613, -0.1122, -0.9281, -0.3781, 0.0461, 0.0040, 1.0578, 0.1835, 
+      0.9436, -0.1237, -1.4173, -0.3306, 0.0424, .0003, 1.0805 , 0.2578, 
+      1.0636, -0.1388, -1.9976, -0.2795, 0.0364, -.0003, 1.0714, 0.3171, 
+      1.1370, -0.1494, -2.4200, -0.2670, 0.0360, -.0024, 1.08994, 0.3809, 
+      1.2213, -0.1619, -2.8644, -0.2632, 0.0368, -.0040, 1.1039, 0.4492, 
+      1.3111, -0.1751, -3.3392, -0.2580, 0.0360, -.0039, 1.1173, 0.5309, 
+      1.4265, -0.1925, -3.8950, -0.2544, 0.0373, -.0064, 1.1421, 0.5734, 
+      1.4818, -0.1986, -4.2420, -0.2111, 0.0329, -.0079, 1.1229, 0.6460, 
+      1.5802, -0.2134, -4.7384, -0.1964, 0.0310, -.0083, 1.1320),ncol=8, byrow=TRUE)
+  
+  calclim <- p
+  if (p > 10) calclim <- 10
+  coefsred <- coefs[1:calclim, ]
+  temp <- c(p:1)
+  multipliers <- matrix(c(log(n),log(p),log(n)*log(p),1), nrow=1)
+  longman <- exp(multipliers%*%t(coefs[,1:4]))[1:calclim]
+  allen <- rep(NA, calclim)
+  leig0 <- 0
+  newlim <- calclim
+  if (calclim+2 < p) newlim <-newlim+2
+  for (i in 1:(newlim-2)){
+    leig1 <- coefsred[i,5:8]%*%matrix(c(1,log(n-1),log((p-i-1)*(p-i+2)/2), leig0))
+    leig0 <- leig1
+    allen[i] <- exp(leig1)
+  }
+  pcompnum <- c(1:calclim)
+  data.frame(cbind(pcompnum,longman,allen))  
+}
+
+parallelplot <- function(comp){
+  if (dim(comp$x)[1] > 1000 || length(comp$sdev) > 100) {
+    print ("Sorry, this only works for n < 1000 and p < 100")
+    stop()
+  }
+  
+  parallelanal <- parallel(dim(comp$x)[1], length(comp$sdev))
+  print(parallelanal)
+  calclim <- min(10, length(comp$sdev))
+  eigenvalues <- (comp$sdev^2)[1:calclim]
+  limits <- as.matrix(parallelanal[,2:3])
+  limits <- limits[complete.cases(limits)]
+  ymax <- range(c(eigenvalues),limits)
+  plot(parallelanal$pcompnum, eigenvalues, xlab="Principal Component Number",
+       ylim=c(ymax), ylab="Eigenvalues and Thresholds",
+       main="Scree Plot with Parallel Analysis Limits",type="b",pch=15,lwd=2, col="red")
+  lines(parallelanal$pcompnum,parallelanal[,2], type="b",col="green",pch=17,lwd=2)
+  lines(parallelanal$pcompnum,parallelanal[,3], type="b",col="blue",pch=18,lwd=2)
+  legend((calclim/2), ymax[2], legend=c("Eigenvalues","Longman Method","Allen Method"),  pch = c(16:18), col= c("red","green","blue"), lwd=2)
+}
+
+
+ciscoreplot<-function(x, comps, namevec){
+  y1<-sqrt(5.99*(x$sdev[comps[1]]^2))
+  ymod<-y1-y1%%.05
+  y1vec<-c(-y1,seq(-ymod,ymod,by=0.05),y1)
+  y2vecpos<-sqrt((5.99-(y1vec^2)/x$sdev[comps[1]]^2)*x$sdev[comps[2]]^2)
+  y2vecneg<--sqrt((5.99-(y1vec^2)/x$sdev[comps[1]]^2)*x$sdev[comps[2]]^2)
+  y2vecpos[1]<-0
+  y2vecneg[1]<-0
+  y2vecpos[length(y2vecpos)]<-0
+  y2vecneg[length(y2vecneg)]<-0
+  
+  plot(x$x[,comps[1]],x$x[,comps[2]], 
+       pch = 19, 
+       cex = 1.2,
+       xlim = c(min(y1vec, x$x[, comps[1]]), max(y1vec, x$x[, comps[1]])),
+       ylim = c(min(y2vecneg, x$x[, comps[2]]), max(y2vecpos, x$x[, comps[2]])),
+       main = "PC Score Plot with 95% CI Ellipse", 
+       xlab = paste("Scores for PC", comps[1], sep = " "), 
+       ylab = paste("Scores for PC", comps[2], sep = " "))
+  
+  lines(y1vec,y2vecpos,col="Red",lwd=2)
+  lines(y1vec,y2vecneg,col="Red",lwd=2)
+  outliers<-((x$x[,comps[1]]^2)/(x$sdev[comps[1]]^2)+(x$x[,comps[2]]^2)/(x$sdev[comps[2]]^2))>5.99
+  
+  points(x$x[outliers, comps[1]], x$x[outliers, comps[2]], pch = 19, cex = 1.2, col = "Blue")
+  
+  text(x$x[outliers, comps[1]],x$x[outliers, comps[2]], col = "Blue", lab = namevec[outliers])
+}
+
+```
+
+```{r dataset}
+# Loading the data set
+data <- read.csv("Housing_UK_2015.csv")
+
+# Filter the data to the relevant, complete variables
+data2 <- data[, c("all_price_2015", "flat_sales_increase", "pop_16_64", "households_owned", "households_rent_private", "student_prop_16_74", "num_lsoas", "emp_deprived_lsoa", "net_commuting")]
+```
+
+## What is the dataset even about?
+
+The dataset was gathered by Richard Prothero from the Office of National Statistics in 2016 which focuses on towns and cities in England and Wales that highlights key indicators on citizens' housing situation and looks at deprivation from a multidimensional perspective.
+
+For this analysis I include 9 variables:
+
+\- all_price_2015: Median House Price for that city, year ending Q2 2015: All properties.
+
+\- flat_sales_increase: Percentage point increase in proportion of flats sold, year ending Q4 1995 to year ending Q2 2015.
+
+\- pop_16_64:Population aged 16-64 for the city.
+
+-   households_owned: Percentage of households that owned houses in the city.
+
+\- households_rent_private: Percentage of households that rented in the city.
+
+\- student_prop_16_74: Percentage of the population aged 16-74 that are full-time students.
+
+\- num_lsoas: Number of Lower Layer Super Output Area (LSOA)
+
+-   A LSOA is a small geographic unit in England and Wales, designed for statistical analysis, typically covering 1,000 to 3,000 people.
+
+\- emp_deprived_lsoa: The percentage of LSOAs that fall within the top 20% most deprived areas based on the employment deprivation domain within the Index of Multiple Deprivation (IMD) - net_commuting: Net number of people that commute in (+) or out (-).
+
+### 1)
+
+```{r plots1}
+# Plotting the matrix of scatter plots to examine the relationships of variables
+plot(data2, pch = 19, cex = .7, col = 'red', main = "Matrix plot of UK Housing data")
+```
+
+```{r plot-linearity}
+# Looking at the matrix that gets the correlation coefficients, histograms, and scatterplots between variables
+chart.Correlation(data2)
+```
+
+```{r c2-plot}
+# Plotting the chi-square quantile plot to test for multivariate normality
+cqplot(data2, main = "UK City House Data")
+```
+
+It seems that there does exist some variables that have strong positive linear relationships given the multiple scatterplots and correlation matrix but there also are a lot of non-linear relationships as seen in the curved lines of best fit, implying non-linear relationships between the variables. Meanwhile, if we look to the chi-square quantile plot, a lot of the points also do not lie on the line, so the data as it is does not look multivariate normal.
+
+But as I transform some variables, these issues approaches multivariate normality to an acceptable degree.
+
+```{r variable transformations}
+# Transforming the non-normal variables
+data2 <- data2 %>%
+  mutate(
+    # Log transformations for very skewed variables
+    all_price_2015 = log(all_price_2015),
+    pop_16_64 = log(pop_16_64),
+    num_lsoas = log(num_lsoas),
+    student_prop_16_74 = log(student_prop_16_74),
+    emp_deprived_lsoa = log(emp_deprived_lsoa + 1),
+    
+    # Inverse Hyperbolic Sine Transformation since net_commuting has negative values
+    net_commuting = asinh(net_commuting)
+  )
+```
+
+```{r plots2}
+plot(data2, pch = 19, cex = .7, col = 'red', main = "Matrix plot of UK Housing data")
+```
+
+```{r plot-linearity2}
+chart.Correlation(data2)
+```
+
+```{r c2-plot2}
+cqplot(data2, main = "UK City House Data")
+```
+
+### 2)
+
+```{r correlation matrix}
+# Examine the correlations
+corrplot.mixed(cor(data2), lower.col = "black", upper = "ellipse", tl.col = "black", number.cex = .7, order = "hclust", tl.pos = "lt", tl.cex = .7)
+```
+
+Among the variables, there seems to be a pattern of relatively strong correlations between variables (mostly positive it seems) while there still are some variables who have close to 0 correlation as their ellipse fades in the table above. Granted that mixed nature of correlations between variables, PCA won't work the best but it won't be useless either since there are variables that are seemingly correlated to one another. Also, the number of observations is another element that may improve PCA's effectiveness since the observation count (109) is much greater than the dimensions/variables being analyzed (8).
+
+### 3)
+
+```{r pca-correlation}
+# Doing PCA
+comp1 <- prcomp(data2, scale. = TRUE)
+summary(comp1)
+
+summary.PCA.JDRS <- function(x){
+  sum_JDRS <- summary(x)$importance
+  sum_JDRS[1, ] <- sum_JDRS[1, ]^2
+  attr(sum_JDRS, "dimnames")[[1]][1] <- "Eigenvals (Variance)"
+  sum_JDRS
+}
+
+round(summary.PCA.JDRS(comp1), 5)
+
+comp1$center
+
+sum(comp1$sdev^2)
+```
+
+```{r scree plot}
+# Constructing the scree plot
+screeplot(comp1, type = "lines", col = "red", lwd = 2, pch = 19, cex = 1.2, 
+          main = "Scree Plot of UK Housing Data")
+```
+
+```{r parallel analysis}
+parallelplot(comp1)
+```
+
+To decide how many principal components to keep I run through each method and then decide.
+
+So first, if I were to look at the eigenvalues and see which principal components have better explanatory power than the original variables, I would retain just 3 principal components since their eigenvalues are greater than 1.
+
+Meanwhile, if I look at the scree plot, there is a very steep drop after the first principal component which tempts me to consider that, but one could also see the elbow at the 3rd principal component which suggests to also keep the 2 principal components above it.
+
+Finally, since the data is multivariate normal enough, I use parallel analysis and see that the intersections of the curves happen below the 2nd eigenvalue, implying that I ought to retain 2 principal components.
+
+Therefore, I'd follow the suggestion of both the scree plot and parallel analysis by retaining the first 2 components.
+
+### 4)
+
+```{r loadings}
+round(comp1$rotation,2)
+```
+
+PC1 seems to capture the situation for students and the youth. Cities with higher working age population demographics seem to tend towards living in flats rather than buying homes. This is likely due to the large proportion of students living in these cities that make their income not high/stable enough to own a home.
+
+PC2 primarily distinguishes places with higher house prices from those with greater inflows of commuters, more deprived neighborhoods, and more LSOAs. In other words, it captures a contrast between smaller, more affluent cities and larger, more deprived cities that tend to draw in outside workers.
+
+### 5)
+
+```{r score plot}
+ciscoreplot(comp1, c(1, 2), data2[, 1])
+```
+
+```{r bi-plot}
+biplot(comp1, choices = c(1, 2), pc.biplot = T)
+```
+
+From the score‐plot standpoint there are no obvious tight clusters—all the points are fairly “in the cloud,” with just a small handful of outliers on either extreme of PC1. Looking at the biplot (variables shown as arrows), one sees that households_owned and all_price_2015 point toward lower PC1/PC2 values (left and downward, respectively), whereas households_rent_private, student_prop_16_74, and emp_deprived_lsoa pull observations in the other directions. In effect, cities toward the right side of PC1 have more private renting, a larger student share, and often higher net_commuting; those lower on PC2 tend to have higher median house prices, whereas those higher on PC2 are more employment‐deprived.
+
+### 6)
+
+I ran a PCA on the UK housing dataset and found it worked pretty well at cutting down the number of dimensions while still capturing the main patterns in the data. The scree plot and parallel analysis both pointed to keeping two principal components, which together explain about 54% of the variance. Digging into what these components mean, PC1 mainly seems to separate areas with lots of students and renters from those with more homeowners. Meanwhile, PC2 appears to differentiate between regions with high house prices and areas facing more employment challenges and heavy commuting. I did notice some nonlinearity in the scatterplots, and a chi-square quantile plot suggested that the data might not be perfectly multivariate normal—although applying some transformations did help improve that issue. The score plot didn’t show any tight clusters, but a few points at the extremes of PC1 stood out as potential multivariate outliers. The biplot further confirmed these findings, showing that variables like households owned and house prices pull in opposite directions compared to renting and student proportions. All in all, while PCA did a solid job of summarizing the overall trends, the presence of some nonlinear relationships and outliers indicates that exploring additional techniques could give a more detailed picture.

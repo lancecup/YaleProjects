@@ -1,0 +1,134 @@
+---
+title: "S&DS 563 HW6"
+author: "Lance Pangilinan"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Setup (Working Directory, Libraries, etc.)
+
+```{r setwd}
+rm(list=ls())
+setwd("~/Downloads/Multivariate_Stats")
+```
+
+```{r libraries}
+library(vegan)
+library(vegan3d)
+library(mgcv)
+library(MASS)
+library(rgl)
+```
+
+## Recap: What is the dataset even about?
+
+The dataset was gathered by Richard Prothero from the Office of National Statistics in 2016 which focuses on towns and cities in England and Wales that highlights key indicators on citizens' housing situation and looks at deprivation from a multidimensional perspective. Each observation is a town.
+
+For this analysis I make two data frames. The first data frame relfreq1 is the dataframe that contains the socio-demographic information in proportions (proportion of students in the population, health-risk, working in manufacturing, homeowners, and renters). Meanwhile, the environ dataframe contains 3 environmental variables:
+
+\- all_price_2015: Median House Price for that city, year ending Q2 2015: All properties.
+
+\- crime_rank: The town's ranking in terms of crime rates.
+
+\- imd_rank: The town's Income Deprivation Rank.
+
+``` {r relative-frequency matrix}
+# Loading the data
+relfreq <- read.csv("Housing_UK_2015.csv")
+relfreq <- head(relfreq, -3)
+
+variables <- c("town", "prop_health_vuln", "households_owned", "households_rent_private", "student_prop_16_74", "prop_manu")
+
+relfreq1 <- relfreq[, variables]
+
+rownames(relfreq1) <- relfreq1[, 1]
+relfreq1 <- relfreq1[, -1]
+
+
+```
+
+``` {r environmental-data}
+env <- c("crime_rank", "all_price_2015", "imd_rank")
+environ <- relfreq[,env]
+```
+
+## 1) - 4)
+
+``` {r fit-ca}
+townsca <- cca(relfreq1)
+townsca
+```
+In this analysis, Correspondence Analysis (CA) is applied to the matrix of relative frequencies representing socio-demographic proportions across towns. The total inertia of the dataset is 0.05439, which represents the total amount of variation (scaled chi-square) in the data. This inertia is decomposed into four unconstrained dimensions, corresponding to the rank of the data. The first axis (CA1) explains 0.03300 of the inertia, while the second axis (CA2) explains 0.01171. Together, CA1 and CA2 account for approximately 82.5% of the total inertia ((0.03300 + 0.01171) / 0.05439 ≈ 0.825), meaning that a two-dimensional plot of the first two axes provides a meaningful summary of the main structure in the data. The remaining variation is captured by CA3 and CA4, which together account for a smaller proportion. This suggests that most of the meaningful differences among towns, in terms of their socio-demographic profiles, can be effectively visualized in two dimensions.
+
+``` {r plot}
+plot(townsca, main = "Correspondence Analysis for UK Towns", type = "n")
+points(townsca, pch = 19, col = "black", cex = 1)
+text(townsca, "species", col = "blue", cex = 1.1)
+```
+It seems that a lot of the variables cluster together. Though we're able to see that there are towns that go further from the center. It's rather difficult to make out what each of the quadrants would represent since the variables seems too clumped together.
+
+Meanwhile, there seems to be weak evidence of data snaking considering that most points seem to be clustered around the origin. There also lacks some kind of arc, wave, or curve that would imply a significant influence of the third dimension on the data's structure. Finally, as mentioned, the first two dimensions do explain 82.5% of the inertia, leaving a smaller fraction of the variation to be explained in higher dimensions.
+
+## 5) - 8)
+
+``` {r mds, results = "hide"}
+towns.mds1 <- metaMDS(relfreq1, distance = "euclidean", k = 1)
+towns.mds2 <- metaMDS(relfreq1, distance = "euclidean", k = 2)
+towns.mds3 <- metaMDS(relfreq1, distance = "euclidean", k = 3)
+
+towns.mds1
+towns.mds2
+towns.mds3
+```
+
+With Multidimensional Scaling, we're representing the similarity between towns in a lower-dimensional space. So we do this in 1, 2, and 3 dimensions respectively. We do this to minimize the difference between the distances in the original high-dimensional space and those in reduced space to visualize the data.
+
+Looking at the stress values, in 1D, the stress is 0.2636, indicating a moderate mismatch between the distances in the high-dimensional space and those in the reduced 1D space. In 2D, the stress drops significantly to 0.1188, approaching the threshold for what is typically considered an acceptable fit. Finally, in 3D, the stress further decreases to 0.0519, which suggests a much better fit and a more accurate representation of the data. Though the scree plot below sees an elbow in 2 dimensions, so let's opt for that since that's where we see diminishing reductions in stress beyond that.
+
+``` {r scree}
+stress <- c(towns.mds1$stress, towns.mds2$stress, towns.mds3$stress)
+plot(c(1:3), stress, col = "blue", lwd = 3, type = "b", xlab = "Dimensions")
+```
+
+``` {r 2d-mds-plot}
+plot(towns.mds2, cex = 0.8, main = "NMDS for UK Towns")
+points(towns.mds2, pch = 19, col = "black", cex = 1)
+text(towns.mds2, "species", col = "blue", cex = 1.1)
+#add environmental variables
+fit <- envfit(towns.mds2, environ, permutations = 1000)
+plot(fit, col = "red", lwd = 3)
+```
+
+```{r}
+fit
+```
+
+From the p-values, it seems that only the town's median house price is significantly correlated with the axes. The rest, crime rank and income deprivation rank, are insignificant in contrast. Though since crime rank is somewhat closer to being significant, I'll make a wire plot of that variable also. 
+
+``` {r wire}
+figure <- ordiplot(towns.mds2, type = "none", cex = 1.1, main = "NMDS for Towns Data")
+text(figure, "species", col = "red", cex = 0.8)
+text(figure, "sites", col = "black", cex = 0.8)
+plot(fit)
+medprice <- with(environ, ordisurf(towns.mds2, all_price_2015))
+crimrank <- with(environ, ordisurf(towns.mds2, crime_rank))
+
+vis.gam(medprice, main = "Town Median Price of Houses")
+vis.gam(crimrank, main = "Town Crime Rank")
+
+```
+
+## 9) - 10)
+
+``` {r canonical}
+canon <- cca(relfreq1, environ, scale = 2)
+plot(canon, main = "Canonical CA for UK Towns")
+
+summary(canon)
+```
+
+CCA effectively links environmental factors to socio-demographic patterns, revealing that higher median house prices strongly correlate with increased homeownership and reduced renting. MDS, an unconstrained and non-linear approach, offers a broader exploration of socio-demographic dissimilarities, confirming the homeownership-renting gradient while also identifying the influence of younger, student populations, with environmental factors like house prices providing interpretive context. CA, focusing exclusively on socio-demographic data, underscores the same housing tenure divide but lacks the environmental perspective, limiting its ability to explain external influences. Together, these methods conclude that housing tenure is a fundamental differentiator among towns, with house prices acting as a key driver, particularly in wealthier areas with more homeowners. For this dataset, MDS worked best, as it directly addressed the relationship between environmental variables and socio-demographic patterns, providing the most targeted insights into how factors like house prices shape town profiles, while CCA and CA were more suited for exploratory analysis, with NMDS offering greater flexibility for capturing complex, non-linear patterns.
